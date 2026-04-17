@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { revalidatePath } from "next/cache";
 import { CompanyStatus } from "@/generated/prisma/enums";
 import { crawlPublicSite } from "@/lib/ingest/crawl";
+import { logIngestEvent } from "@/lib/ingest/ingest-telemetry";
 import { prisma } from "@/lib/prisma";
 import { buildWebResearchCorpus } from "@/lib/ingest/research-from-web";
 
@@ -123,22 +124,33 @@ ${knowledgeMarkdown.slice(0, 8000)}`,
 export async function runCompanyIngestion(companyId: string): Promise<void> {
   const company = await prisma.company.findUnique({ where: { id: companyId } });
   if (!company) {
+    logIngestEvent(companyId, "aborted_company_missing");
     return;
   }
+
+  logIngestEvent(companyId, "run_begin", { slug: company.slug, sourceUrl: company.sourceUrl });
 
   try {
     await prisma.company.update({
       where: { id: companyId },
       data: { status: CompanyStatus.COLLECTING, errorMessage: null },
     });
+    logIngestEvent(companyId, "status_collecting_written");
 
+    logIngestEvent(companyId, "crawl_begin");
     const pages = await crawlPublicSite(company.sourceUrl);
+    logIngestEvent(companyId, "crawl_done", { pageCount: pages.length });
     const crawlCorpus = formatCorpus(pages);
 
+    logIngestEvent(companyId, "web_research_begin");
     const webResearch = await buildWebResearchCorpus({
       companyName: company.companyName,
       sourceUrl: company.sourceUrl,
       officialPageUrls: pages.map((p) => p.url),
+    });
+    logIngestEvent(companyId, "web_research_done", {
+      corpusChars: webResearch.corpus?.length ?? 0,
+      creditsUsed: webResearch.creditsUsed,
     });
 
     await prisma.company.update({
@@ -149,17 +161,25 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
         webResearchCorpus: webResearch.corpus,
       },
     });
+    logIngestEvent(companyId, "status_generating_written");
 
+    logIngestEvent(companyId, "knowledge_markdown_llm_begin");
     const knowledgeMarkdown = await generateKnowledgeMarkdown(
       company.companyName,
       company.sourceUrl,
       crawlCorpus,
       webResearch.corpus,
     );
+    logIngestEvent(companyId, "knowledge_markdown_llm_done", {
+      knowledgeChars: knowledgeMarkdown.length,
+    });
+
+    logIngestEvent(companyId, "llm_prompts_begin");
     const [systemPrompt, publicAgentDescription] = await Promise.all([
       generateSystemPrompt(company.companyName, company.sourceUrl, knowledgeMarkdown),
       generatePublicAgentDescription(company.companyName, company.sourceUrl, knowledgeMarkdown),
     ]);
+    logIngestEvent(companyId, "llm_prompts_done");
 
     await prisma.company.update({
       where: { id: companyId },
@@ -171,11 +191,13 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
         errorMessage: null,
       },
     });
+    logIngestEvent(companyId, "status_ready_written");
     revalidatePath("/admin");
     revalidatePath(`/admin/companies/${company.slug}`);
     revalidatePath(`/c/${company.slug}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Ingestion failed.";
+    logIngestEvent(companyId, "run_failed", { message });
     await prisma.company.update({
       where: { id: companyId },
       data: {

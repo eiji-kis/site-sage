@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { logIngestEvent } from "@/lib/ingest/ingest-telemetry";
 import { runCompanyIngestion } from "@/lib/ingest/pipeline";
 import { createUniqueCompanySlug } from "@/lib/slug";
 import { createCompanySchema, deleteCompanySchema } from "@/lib/validations/company";
@@ -41,7 +42,14 @@ export async function createCompanyAndStartIngestion(
   });
 
   after(() => {
-    void runCompanyIngestion(company.id);
+    logIngestEvent(company.id, "after_callback_begin", { slug: company.slug });
+    void runCompanyIngestion(company.id).then(
+      () => logIngestEvent(company.id, "after_callback_done"),
+      (err: unknown) =>
+        logIngestEvent(company.id, "after_callback_rejected", {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+    );
   });
 
   revalidatePath("/admin");

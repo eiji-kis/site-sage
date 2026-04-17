@@ -1,5 +1,8 @@
 import { NewAgentForm } from "./new-agent-form";
 
+/** Same as admin layout; repeated here so this route’s server action + `after()` pick up the limit reliably. */
+export const maxDuration = 300;
+
 export default function NewAgentPage() {
   return (
     <div className="flex flex-col gap-8">
