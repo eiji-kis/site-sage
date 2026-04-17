@@ -12,12 +12,20 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
+    const res = await fetch(url, {
       signal: controller.signal,
       headers: {
         "User-Agent": userAgent,
         Accept: "text/html,application/xhtml+xml;q=0.9,application/xml;q=0.8,*/*;q=0.7",
       },
+    });
+    // Apply timeout to the full response body read (clearing the timer in `fetch`'s settle
+    // would leave stalled downloads unbounded).
+    const text = await res.text();
+    return new Response(text, {
+      status: res.status,
+      statusText: res.statusText,
+      headers: new Headers(res.headers),
     });
   } finally {
     clearTimeout(id);

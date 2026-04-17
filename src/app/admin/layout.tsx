@@ -5,6 +5,9 @@ import { signOutAction } from "@/actions/auth-actions";
 import { AdminNavBrand } from "@/components/shell/admin-nav-brand";
 import { Button } from "@/components/ui/button";
 
+/** Vercel / Next: ingestion runs in `after()` on the same invocation; raise limit so crawl + LLM can finish (requires a plan that allows >60s if you need it). */
+export const maxDuration = 300;
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user) {
