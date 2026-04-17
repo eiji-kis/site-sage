@@ -1,5 +1,5 @@
 import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+import { parseHTML } from "linkedom";
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 12_000;
 export const DEFAULT_USER_AGENT = "SiteSageBot/0.1 (+https://example.local; research crawler)";
@@ -24,13 +24,36 @@ export async function fetchWithTimeout(
   }
 }
 
+function applyBaseUrlToDocument(document: Document, pageUrl: string): void {
+  let href: string;
+  try {
+    href = new URL(pageUrl).href;
+  } catch {
+    return;
+  }
+  const baseEl = document.createElement("base");
+  baseEl.setAttribute("href", href);
+  const head = document.head;
+  if (head) {
+    head.insertBefore(baseEl, head.firstChild);
+    return;
+  }
+  const htmlEl = document.documentElement;
+  if (!htmlEl) {
+    return;
+  }
+  const newHead = document.createElement("head");
+  newHead.appendChild(baseEl);
+  htmlEl.insertBefore(newHead, htmlEl.firstChild);
+}
+
 export function extractReadableText(html: string, pageUrl: string): string {
-  const dom = new JSDOM(html, { url: pageUrl });
-  const doc = dom.window.document;
-  const article = new Readability(doc).parse();
+  const { document } = parseHTML(html);
+  applyBaseUrlToDocument(document, pageUrl);
+  const article = new Readability(document).parse();
   const text = article?.textContent?.trim();
   if (text) {
     return text;
   }
-  return doc.body?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+  return document.body?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 }

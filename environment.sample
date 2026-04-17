@@ -1,7 +1,16 @@
-# Copy to .env.local and adjust. Values below match docker-compose defaults.
+# Copy to `.env` (or `.env.local` for Next-only overrides) and adjust.
 
-# Use schema=site_sage so the default search_path matches app tables (see prisma/schema.prisma).
-DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:55431/site_sage?schema=site_sage"
+# Always include `schema=site_sage` so the default search_path matches app tables (see prisma/schema.prisma).
+
+# --- Local Postgres (docker-compose.yml): set POSTGRES_PORT to match the host port ---
+# POSTGRES_PORT=55431
+# DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:55431/site_sage?schema=site_sage"
+
+# --- Prisma Postgres / other managed Postgres (TLS) ---
+# DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require&schema=site_sage"
+# Optional: some hosts / dashboards expect these mirrors of the same connection string.
+# POSTGRES_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require&schema=site_sage"
+# PRISMA_DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require&schema=site_sage"
 
 # Required — Auth.js will 500 without it (openssl rand -base64 32)
 AUTH_SECRET="replace-with-openssl-rand-base64-32"
