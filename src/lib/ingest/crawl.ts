@@ -1,5 +1,12 @@
 import * as cheerio from "cheerio";
-import { DEFAULT_FETCH_TIMEOUT_MS, DEFAULT_USER_AGENT, extractReadableText, fetchWithTimeout } from "@/lib/ingest/fetch-page";
+import {
+  DEFAULT_FETCH_TIMEOUT_MS,
+  DEFAULT_USER_AGENT,
+  extractReadableText,
+  fetchWithTimeout,
+  truncateHtmlForIngest,
+} from "@/lib/ingest/fetch-page";
+import { logIngestEvent } from "@/lib/ingest/ingest-telemetry";
 import { normalizeSeedUrl } from "@/lib/ingest/normalize-seed-url";
 import { isPathAllowed, parseRobotsTxt, type RobotRules } from "@/lib/ingest/robots";
 
@@ -11,6 +18,7 @@ const USER_AGENT = DEFAULT_USER_AGENT;
 const HUB_PATHS = ["/about", "/team", "/careers", "/press", "/news", "/blog", "/company", "/contact"];
 const MAX_SITEMAP_INDEXES = 3;
 const MAX_SITEMAP_PAGE_URLS = 36;
+const MAX_SITEMAP_XML_CHARS = 2_000_000;
 
 async function fetchText(url: string): Promise<Response> {
   return fetchWithTimeout(url, FETCH_TIMEOUT_MS, USER_AGENT);
@@ -71,7 +79,9 @@ async function collectSitemapSeedUrls(root: URL, robotsRules: RobotRules): Promi
     if (!res.ok) {
       return out;
     }
-    sitemapXml = await res.text();
+    const rawSitemap = await res.text();
+    sitemapXml =
+      rawSitemap.length > MAX_SITEMAP_XML_CHARS ? rawSitemap.slice(0, MAX_SITEMAP_XML_CHARS) : rawSitemap;
   } catch {
     return out;
   }
@@ -104,7 +114,9 @@ async function collectSitemapSeedUrls(root: URL, robotsRules: RobotRules): Promi
         if (!childRes.ok) {
           continue;
         }
-        const childXml = await childRes.text();
+        const rawChild = await childRes.text();
+        const childXml =
+          rawChild.length > MAX_SITEMAP_XML_CHARS ? rawChild.slice(0, MAX_SITEMAP_XML_CHARS) : rawChild;
         for (const loc of parseSitemapLocs(childXml)) {
           tryAddUrl(loc);
           if (out.length >= MAX_SITEMAP_PAGE_URLS) {
@@ -129,7 +141,7 @@ async function collectSitemapSeedUrls(root: URL, robotsRules: RobotRules): Promi
 
 export type CrawledPage = { url: string; text: string };
 
-export async function crawlPublicSite(startUrl: string): Promise<CrawledPage[]> {
+export async function crawlPublicSite(startUrl: string, ingestCompanyId: string): Promise<CrawledPage[]> {
   const root = normalizeSeedUrl(startUrl);
   const originHost = root.hostname;
 
@@ -145,12 +157,16 @@ export async function crawlPublicSite(startUrl: string): Promise<CrawledPage[]> 
     /* ignore robots failures */
   }
 
+  logIngestEvent(ingestCompanyId, "crawl_robots_done", { ruleCount: robotsRules.disallows.length });
+
   if (!isPathAllowed(root.pathname + root.search, robotsRules)) {
     throw new Error("Start URL is disallowed by robots.txt for this host.");
   }
 
   const seedUrls: string[] = [root.toString()];
+  logIngestEvent(ingestCompanyId, "crawl_sitemap_begin");
   const sitemapUrls = await collectSitemapSeedUrls(root, robotsRules);
+  logIngestEvent(ingestCompanyId, "crawl_sitemap_done", { urlCount: sitemapUrls.length });
   for (const u of sitemapUrls) {
     if (!seedUrls.includes(u)) {
       seedUrls.push(u);
@@ -179,6 +195,11 @@ export async function crawlPublicSite(startUrl: string): Promise<CrawledPage[]> 
   const queue: { url: string; depth: number }[] = seedUrls.map((url) => ({ url, depth: 0 }));
   const results: CrawledPage[] = [];
 
+  logIngestEvent(ingestCompanyId, "crawl_bfs_begin", {
+    queueLength: queue.length,
+    seedDistinct: seedUrls.length,
+  });
+
   while (queue.length > 0 && results.length < MAX_PAGES) {
     const item = queue.shift();
     if (!item) {
@@ -203,6 +224,8 @@ export async function crawlPublicSite(startUrl: string): Promise<CrawledPage[]> 
       continue;
     }
 
+    logIngestEvent(ingestCompanyId, "crawl_fetch", { url });
+
     let res: Response;
     try {
       res = await fetchText(url);
@@ -220,7 +243,11 @@ export async function crawlPublicSite(startUrl: string): Promise<CrawledPage[]> 
       continue;
     }
 
+    html = truncateHtmlForIngest(html);
+    logIngestEvent(ingestCompanyId, "crawl_parse_begin", { url, htmlChars: html.length });
+
     const text = extractReadableText(html, url);
+    logIngestEvent(ingestCompanyId, "crawl_parse_done", { url, textChars: text.length });
     if (text.length > 80) {
       results.push({ url, text });
     }

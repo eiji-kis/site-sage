@@ -4,6 +4,16 @@ import { parseHTML } from "linkedom";
 export const DEFAULT_FETCH_TIMEOUT_MS = 12_000;
 export const DEFAULT_USER_AGENT = "SiteSageBot/0.1 (+https://example.local; research crawler)";
 
+/** Large marketing sites ship multi‑MB HTML; linkedom + Readability + cheerio are sync and can freeze the worker. */
+export const MAX_HTML_CHARS_FOR_INGEST = 1_200_000;
+
+export function truncateHtmlForIngest(html: string): string {
+  if (html.length <= MAX_HTML_CHARS_FOR_INGEST) {
+    return html;
+  }
+  return html.slice(0, MAX_HTML_CHARS_FOR_INGEST);
+}
+
 export async function fetchWithTimeout(
   url: string,
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
@@ -56,7 +66,8 @@ function applyBaseUrlToDocument(document: Document, pageUrl: string): void {
 }
 
 export function extractReadableText(html: string, pageUrl: string): string {
-  const { document } = parseHTML(html);
+  const clipped = truncateHtmlForIngest(html);
+  const { document } = parseHTML(clipped);
   applyBaseUrlToDocument(document, pageUrl);
   const article = new Readability(document).parse();
   const text = article?.textContent?.trim();

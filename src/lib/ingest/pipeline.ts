@@ -138,7 +138,7 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
     logIngestEvent(companyId, "status_collecting_written");
 
     logIngestEvent(companyId, "crawl_begin");
-    const pages = await crawlPublicSite(company.sourceUrl);
+    const pages = await crawlPublicSite(company.sourceUrl, companyId);
     logIngestEvent(companyId, "crawl_done", { pageCount: pages.length });
     const crawlCorpus = formatCorpus(pages);
 
