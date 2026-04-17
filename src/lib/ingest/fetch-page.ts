@@ -1,8 +1,9 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 
-export const DEFAULT_FETCH_TIMEOUT_MS = 12_000;
-export const DEFAULT_USER_AGENT = "SiteSageBot/0.1 (+https://example.local; research crawler)";
+export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+export const DEFAULT_USER_AGENT =
+  "Mozilla/5.0 (compatible; SiteSageBot/0.1; +https://site-sage.local)";
 
 /**
  * Large marketing sites ship multi‑MB HTML; linkedom + Readability + cheerio are
@@ -18,32 +19,53 @@ export function truncateHtmlForIngest(html: string): string {
   return html.slice(0, MAX_HTML_CHARS_FOR_INGEST);
 }
 
+/**
+ * Hard escape: if `p` hasn't settled in `ms`, reject with a timeout error.
+ * The original promise may keep running in the background but the caller is unblocked.
+ */
+function raceWithTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label}: timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
+}
+
 export async function fetchWithTimeout(
   url: string,
   timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
   userAgent: string = DEFAULT_USER_AGENT,
 ): Promise<Response> {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": userAgent,
-        Accept: "text/html,application/xhtml+xml;q=0.9,application/xml;q=0.8,*/*;q=0.7",
-      },
-    });
-    // Apply timeout to the full response body read (clearing the timer in `fetch`'s settle
-    // would leave stalled downloads unbounded).
-    const text = await res.text();
-    return new Response(text, {
-      status: res.status,
-      statusText: res.statusText,
-      headers: new Headers(res.headers),
-    });
-  } finally {
-    clearTimeout(id);
-  }
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  // Belt-and-suspenders: some runtimes don't reliably abort a slow body read via the signal,
+  // so wrap the whole fetch + body read in a Promise.race with a hard reject at timeoutMs * 1.2.
+  const work = (async () => {
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        redirect: "follow",
+        headers: {
+          "User-Agent": userAgent,
+          Accept: "text/html,application/xhtml+xml;q=0.9,application/xml;q=0.8,*/*;q=0.7",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      });
+      const text = await res.text();
+      return new Response(text, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: new Headers(res.headers),
+      });
+    } finally {
+      clearTimeout(abortTimer);
+    }
+  })();
+  return raceWithTimeout(work, Math.ceil(timeoutMs * 1.2), `fetch ${url}`);
 }
 
 function applyBaseUrlToDocument(document: Document, pageUrl: string): void {

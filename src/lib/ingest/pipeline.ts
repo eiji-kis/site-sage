@@ -154,6 +154,7 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
       companyName: company.companyName,
       sourceUrl: company.sourceUrl,
       officialPageUrls: pages.map((p) => p.url),
+      ingestCompanyId: companyId,
     });
     logIngestEvent(companyId, "web_research_done", {
       corpusChars: webResearch.corpus?.length ?? 0,

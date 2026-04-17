@@ -30,6 +30,10 @@ const CRAWL_CONCURRENCY = 5;
 const SITEMAP_BUDGET_MS = 15_000;
 const SITEMAP_FETCH_TIMEOUT_MS = 8_000;
 const MAX_LINKS_PER_PAGE = 15;
+/** Hard per-URL cap (fetch + parse). Anything slower than this gets skipped. */
+const PER_ITEM_TIMEOUT_MS = 15_000;
+/** Hard cap on a full batch — even if individual items hung, the crawl loop makes progress. */
+const PER_BATCH_TIMEOUT_MS = 20_000;
 
 async function fetchText(url: string, timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Response> {
   return fetchWithTimeout(url, timeoutMs, USER_AGENT);
@@ -176,7 +180,7 @@ type ProcessOutcome = {
   links?: string[];
 };
 
-async function processQueueItem(
+async function processQueueItemInner(
   item: QueueItem,
   originHost: string,
   robotsRules: RobotRules,
@@ -197,18 +201,33 @@ async function processQueueItem(
     return { url, depth, skipReason: "robots_disallow" };
   }
 
+  const startedAt = Date.now();
   logIngestEvent(ingestCompanyId, "crawl_fetch", { url });
 
   let res: Response;
   try {
     res = await fetchText(url);
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logIngestEvent(ingestCompanyId, "crawl_fetch_error", {
+      url,
+      ms: Date.now() - startedAt,
+      message,
+    });
     return { url, depth, skipReason: "fetch_error" };
   }
+
+  const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+  logIngestEvent(ingestCompanyId, "crawl_fetch_response", {
+    url,
+    ms: Date.now() - startedAt,
+    status: res.status,
+    contentType,
+  });
+
   if (!res.ok) {
     return { url, depth, skipReason: `http_${res.status}` };
   }
-  const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("text/html")) {
     return { url, depth, skipReason: "not_html" };
   }
@@ -216,12 +235,19 @@ async function processQueueItem(
   let html: string;
   try {
     html = await res.text();
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logIngestEvent(ingestCompanyId, "crawl_body_error", { url, message });
     return { url, depth, skipReason: "read_error" };
   }
 
+  const rawBytes = html.length;
   html = truncateHtmlForIngest(html);
-  logIngestEvent(ingestCompanyId, "crawl_parse_begin", { url, htmlChars: html.length });
+  logIngestEvent(ingestCompanyId, "crawl_parse_begin", {
+    url,
+    rawChars: rawBytes,
+    parsedChars: html.length,
+  });
   const text = extractReadableText(html, url);
   logIngestEvent(ingestCompanyId, "crawl_parse_done", { url, textChars: text.length });
 
@@ -232,6 +258,38 @@ async function processQueueItem(
       : undefined;
 
   return { url, depth, page: page ?? undefined, links, skipReason: page ? undefined : "text_too_short" };
+}
+
+/**
+ * Defense-in-depth wrapper: if a single URL exceeds `PER_ITEM_TIMEOUT_MS`, short-circuit
+ * so the batch can make progress even when the underlying fetch/parse hangs.
+ */
+async function processQueueItem(
+  item: QueueItem,
+  originHost: string,
+  robotsRules: RobotRules,
+  ingestCompanyId: string,
+): Promise<ProcessOutcome> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<ProcessOutcome>((resolve) => {
+    timer = setTimeout(() => {
+      logIngestEvent(ingestCompanyId, "crawl_item_timeout", {
+        url: item.url,
+        afterMs: PER_ITEM_TIMEOUT_MS,
+      });
+      resolve({ url: item.url, depth: item.depth, skipReason: "item_timeout" });
+    }, PER_ITEM_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([
+      processQueueItemInner(item, originHost, robotsRules, ingestCompanyId),
+      timeout,
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 export async function crawlPublicSite(startUrl: string, ingestCompanyId: string): Promise<CrawledPage[]> {
@@ -261,6 +319,7 @@ export async function crawlPublicSite(startUrl: string, ingestCompanyId: string)
   await setProgressStage(ingestCompanyId, "Reading sitemap");
   const sitemapUrls = await collectSitemapSeedUrls(root, robotsRules);
   logIngestEvent(ingestCompanyId, "crawl_sitemap_done", { urlCount: sitemapUrls.length });
+  await setProgressStage(ingestCompanyId, `Crawling website (0 / ${MAX_PAGES} pages)`);
   for (const u of sitemapUrls) {
     if (!seedUrls.includes(u)) {
       seedUrls.push(u);
@@ -331,10 +390,31 @@ export async function crawlPublicSite(startUrl: string, ingestCompanyId: string)
       queueRemaining: queue.length,
       resultsCount: results.length,
     });
-
-    const outcomes = await Promise.all(
-      batch.map((item) => processQueueItem(item, originHost, robotsRules, ingestCompanyId)),
+    await setProgressStage(
+      ingestCompanyId,
+      `Crawling website (${results.length} / ${MAX_PAGES} pages, fetching ${batch.length})`,
     );
+
+    let batchTimer: ReturnType<typeof setTimeout> | undefined;
+    const batchWatchdog = new Promise<ProcessOutcome[]>((resolve) => {
+      batchTimer = setTimeout(() => {
+        logIngestEvent(ingestCompanyId, "crawl_batch_timeout", {
+          batch: batchIndex,
+          size: batch.length,
+          afterMs: PER_BATCH_TIMEOUT_MS,
+        });
+        resolve(
+          batch.map((item) => ({ url: item.url, depth: item.depth, skipReason: "batch_timeout" })),
+        );
+      }, PER_BATCH_TIMEOUT_MS);
+    });
+    const outcomes = await Promise.race([
+      Promise.all(batch.map((item) => processQueueItem(item, originHost, robotsRules, ingestCompanyId))),
+      batchWatchdog,
+    ]);
+    if (batchTimer) {
+      clearTimeout(batchTimer);
+    }
 
     for (const outcome of outcomes) {
       if (outcome.skipReason && !outcome.page) {

@@ -1,5 +1,6 @@
 import { DEFAULT_FETCH_TIMEOUT_MS, extractReadableText, fetchWithTimeout } from "@/lib/ingest/fetch-page";
 import { normalizeSeedUrl } from "@/lib/ingest/normalize-seed-url";
+import { setProgressStage } from "@/lib/ingest/pipeline-progress";
 import { isPathAllowed, loadRobotRulesForOrigin, type RobotRules } from "@/lib/ingest/robots";
 import { searchTavily, tavilySearchCreditCost, type TavilySearchDepth, type TavilyWebResult } from "@/lib/ingest/tavily-search";
 
@@ -113,12 +114,19 @@ export async function buildWebResearchCorpus(params: {
   companyName: string;
   sourceUrl: string;
   officialPageUrls: Iterable<string>;
+  ingestCompanyId?: string;
 }): Promise<WebResearchResult> {
   const apiKey = process.env.TAVILY_API_KEY?.trim();
   const creditBudget = parseCreditBudget();
   if (!apiKey || creditBudget === 0) {
     return { corpus: null, creditsUsed: 0, creditBudget };
   }
+
+  const reportProgress = async (stage: string): Promise<void> => {
+    if (params.ingestCompanyId) {
+      await setProgressStage(params.ingestCompanyId, stage);
+    }
+  };
 
   const root = normalizeSeedUrl(params.sourceUrl);
   const companyHostKey = hostKey(root.hostname);
@@ -141,6 +149,7 @@ export async function buildWebResearchCorpus(params: {
     if (creditsRemaining < costPerSearch) {
       break;
     }
+    await reportProgress(`Searching public sources (query ${i + 1} / ${queries.length})`);
     try {
       const { results, creditsCharged } = await searchTavily({
         apiKey,
@@ -262,6 +271,9 @@ export async function buildWebResearchCorpus(params: {
   const outcomes: FetchOutcome[] = [];
   for (let i = 0; i < toFetch.length && Date.now() < deadline; i += RESEARCH_FETCH_CONCURRENCY) {
     const batch = toFetch.slice(i, i + RESEARCH_FETCH_CONCURRENCY);
+    await reportProgress(
+      `Fetching public sources (${outcomes.length} / ${toFetch.length} sources)`,
+    );
     const results = await Promise.all(batch.map(fetchOne));
     for (const result of results) {
       if (result) {
