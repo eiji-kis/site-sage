@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AutoRefreshWhileIngesting } from "@/components/admin/auto-refresh-while-ingesting";
 import { CompanyIngestTabs } from "@/components/admin/company-ingest-tabs";
+import { CompanyStatusCell, isInProgress } from "@/components/admin/company-status-cell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { analyticsRollupForCompany } from "@/lib/analytics-queries";
@@ -18,6 +20,7 @@ export default async function AdminCompanyIngestPage(props: PageProps) {
       slug: true,
       sourceUrl: true,
       status: true,
+      progressStage: true,
       errorMessage: true,
       crawlCorpus: true,
       webResearchCorpus: true,
@@ -41,6 +44,7 @@ export default async function AdminCompanyIngestPage(props: PageProps) {
 
   return (
     <div className="flex flex-col gap-8">
+      <AutoRefreshWhileIngesting hasInProgress={isInProgress(company.status)} />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">
           <Button variant="ghost" size="sm" className="h-auto w-fit px-0 text-muted-foreground hover:text-foreground" asChild>
@@ -49,15 +53,19 @@ export default async function AdminCompanyIngestPage(props: PageProps) {
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
             <span className="text-gradient-brand">{company.companyName}</span>
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Status: <span className="text-foreground/90">{company.status}</span>
-            {" · "}
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <CompanyStatusCell
+              status={company.status}
+              progressStage={company.progressStage}
+              layout="inline"
+            />
+            <span aria-hidden>·</span>
             <Link href={company.sourceUrl} className="text-primary underline-offset-4 hover:underline" target="_blank" rel="noreferrer">
               Source site
             </Link>
             {company.status === "READY" ? (
               <>
-                {" · "}
+                <span aria-hidden>·</span>
                 <Link
                   href={`/c/${company.slug}`}
                   className="text-primary underline-offset-4 hover:underline"
@@ -68,7 +76,7 @@ export default async function AdminCompanyIngestPage(props: PageProps) {
                 </Link>
               </>
             ) : null}
-          </p>
+          </div>
         </div>
       </div>
 

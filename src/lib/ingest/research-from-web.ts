@@ -8,6 +8,10 @@ const MAX_TAVILY_RESULTS_PER_QUERY = 6;
 const MAX_EXTERNAL_FETCHES = 10;
 const MIN_PAGE_TEXT_LEN = 80;
 const SEARCH_DEPTH: TavilySearchDepth = "basic";
+/** Keep research under ~60 s so the full ingest finishes well under Vercel `maxDuration`. */
+const RESEARCH_BUDGET_MS = 60_000;
+const RESEARCH_FETCH_CONCURRENCY = 4;
+const RESEARCH_FETCH_TIMEOUT_MS = 8_000;
 
 const TAVILY_EXCLUDE_DOMAINS = [
   "facebook.com",
@@ -208,56 +212,80 @@ export async function buildWebResearchCorpus(params: {
   sections.push(`Tavily API credits used this ingest: ${creditsUsed} / ${creditBudget}\n`);
   sections.push("\n---\n\n");
 
-  let fetchCount = 0;
-  for (const row of candidates) {
-    if (fetchCount >= MAX_EXTERNAL_FETCHES) {
-      break;
-    }
+  type FetchOutcome = {
+    url: string;
+    title: string;
+    snippet: string;
+    fetched: string | null;
+    disallowed: boolean;
+  };
+
+  const deadline = Date.now() + RESEARCH_BUDGET_MS;
+  const toFetch = candidates.slice(0, MAX_EXTERNAL_FETCHES);
+
+  async function fetchOne(row: TavilyWebResult): Promise<FetchOutcome | null> {
     const url = canonicalUrlString(row.url);
     if (!url) {
-      continue;
+      return null;
     }
-
-    let fetched: string | null = null;
+    if (Date.now() >= deadline) {
+      return { url, title: row.title, snippet: row.snippet, fetched: null, disallowed: false };
+    }
     try {
       const rules = await loadRules(url);
       const u = new URL(url);
       if (!isPathAllowed(u.pathname + u.search, rules)) {
-        sections.push(`### Source (web): ${url}\n\n`);
-        sections.push(`**Tavily snippet:** ${row.snippet || "(none)"}\n\n`);
-        sections.push("**Fetched content:** (path disallowed by robots.txt)\n\n---\n\n");
-        fetchCount++;
-        continue;
+        return { url, title: row.title, snippet: row.snippet, fetched: null, disallowed: true };
       }
-      const res = await fetchWithTimeout(url, DEFAULT_FETCH_TIMEOUT_MS);
-      if (res.ok) {
-        const ct = res.headers.get("content-type")?.toLowerCase() ?? "";
-        if (ct.includes("text/html")) {
-          const html = await res.text();
-          const text = extractReadableText(html, url);
-          if (text.length >= MIN_PAGE_TEXT_LEN) {
-            fetched = text;
-          }
-        }
+      const res = await fetchWithTimeout(url, RESEARCH_FETCH_TIMEOUT_MS);
+      if (!res.ok) {
+        return { url, title: row.title, snippet: row.snippet, fetched: null, disallowed: false };
       }
+      const ct = res.headers.get("content-type")?.toLowerCase() ?? "";
+      if (!ct.includes("text/html")) {
+        return { url, title: row.title, snippet: row.snippet, fetched: null, disallowed: false };
+      }
+      const html = await res.text();
+      const text = extractReadableText(html, url);
+      return {
+        url,
+        title: row.title,
+        snippet: row.snippet,
+        fetched: text.length >= MIN_PAGE_TEXT_LEN ? text : null,
+        disallowed: false,
+      };
     } catch {
-      fetched = null;
+      return { url, title: row.title, snippet: row.snippet, fetched: null, disallowed: false };
     }
+  }
 
-    sections.push(`### Source (web): ${url}\n\n`);
-    if (row.title.trim()) {
-      sections.push(`**Title:** ${row.title.trim()}\n\n`);
+  const outcomes: FetchOutcome[] = [];
+  for (let i = 0; i < toFetch.length && Date.now() < deadline; i += RESEARCH_FETCH_CONCURRENCY) {
+    const batch = toFetch.slice(i, i + RESEARCH_FETCH_CONCURRENCY);
+    const results = await Promise.all(batch.map(fetchOne));
+    for (const result of results) {
+      if (result) {
+        outcomes.push(result);
+      }
     }
-    if (row.snippet.trim()) {
-      sections.push(`**Tavily snippet:** ${row.snippet.trim()}\n\n`);
+  }
+
+  for (const outcome of outcomes) {
+    sections.push(`### Source (web): ${outcome.url}\n\n`);
+    if (outcome.title.trim()) {
+      sections.push(`**Title:** ${outcome.title.trim()}\n\n`);
     }
-    if (fetched) {
-      sections.push(`**Fetched page text:**\n\n${fetched}\n\n`);
+    if (outcome.snippet.trim()) {
+      sections.push(`**Tavily snippet:** ${outcome.snippet.trim()}\n\n`);
+    }
+    if (outcome.disallowed) {
+      sections.push("**Fetched content:** (path disallowed by robots.txt)\n\n");
+    } else if (outcome.fetched) {
+      sections.push(`**Fetched page text:**\n\n${outcome.fetched}\n\n`);
     } else {
       sections.push("**Fetched page text:** (unavailable or too short; rely on snippet only)\n\n");
     }
     sections.push("---\n\n");
-    fetchCount++;
   }
 
   return {

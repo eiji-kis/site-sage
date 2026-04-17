@@ -12,6 +12,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AutoRefreshWhileIngesting } from "@/components/admin/auto-refresh-while-ingesting";
+import { CompanyStatusCell, isInProgress } from "@/components/admin/company-status-cell";
 import { DeleteCompanyDialog } from "@/components/admin/delete-company-dialog";
 
 export default async function AdminHomePage() {
@@ -23,10 +25,13 @@ export default async function AdminHomePage() {
       companyName: true,
       sourceUrl: true,
       status: true,
+      progressStage: true,
       errorMessage: true,
       updatedAt: true,
     },
   });
+
+  const hasInProgress = companies.some((c) => isInProgress(c.status));
 
   // Request-time window for analytics (not render-pure by design).
   const since7 = new Date(Date.now() - 7 * 86400000); // eslint-disable-line react-hooks/purity -- server-only relative window
@@ -37,6 +42,7 @@ export default async function AdminHomePage() {
 
   return (
     <div className="flex flex-col gap-8">
+      <AutoRefreshWhileIngesting hasInProgress={hasInProgress} />
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
@@ -85,7 +91,9 @@ export default async function AdminHomePage() {
                   return (
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">{c.companyName}</TableCell>
-                    <TableCell className="text-muted-foreground">{c.status}</TableCell>
+                    <TableCell>
+                      <CompanyStatusCell status={c.status} progressStage={c.progressStage} />
+                    </TableCell>
                     <TableCell className="hidden text-right font-mono text-xs tabular-nums text-muted-foreground xl:table-cell">
                       {a.pageViews}
                     </TableCell>

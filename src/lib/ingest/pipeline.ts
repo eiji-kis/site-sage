@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { CompanyStatus } from "@/generated/prisma/enums";
 import { crawlPublicSite } from "@/lib/ingest/crawl";
 import { logIngestEvent } from "@/lib/ingest/ingest-telemetry";
+import { setProgressStage } from "@/lib/ingest/pipeline-progress";
 import { prisma } from "@/lib/prisma";
 import { buildWebResearchCorpus } from "@/lib/ingest/research-from-web";
 
@@ -133,16 +134,22 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
   try {
     await prisma.company.update({
       where: { id: companyId },
-      data: { status: CompanyStatus.COLLECTING, errorMessage: null },
+      data: {
+        status: CompanyStatus.COLLECTING,
+        progressStage: "Starting crawl",
+        errorMessage: null,
+      },
     });
     logIngestEvent(companyId, "status_collecting_written");
 
     logIngestEvent(companyId, "crawl_begin");
+    await setProgressStage(companyId, "Crawling website");
     const pages = await crawlPublicSite(company.sourceUrl, companyId);
     logIngestEvent(companyId, "crawl_done", { pageCount: pages.length });
     const crawlCorpus = formatCorpus(pages);
 
     logIngestEvent(companyId, "web_research_begin");
+    await setProgressStage(companyId, `Searching public sources (crawled ${pages.length} pages)`);
     const webResearch = await buildWebResearchCorpus({
       companyName: company.companyName,
       sourceUrl: company.sourceUrl,
@@ -159,6 +166,7 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
         status: CompanyStatus.GENERATING,
         crawlCorpus,
         webResearchCorpus: webResearch.corpus,
+        progressStage: "Generating knowledge base",
       },
     });
     logIngestEvent(companyId, "status_generating_written");
@@ -174,6 +182,7 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
       knowledgeChars: knowledgeMarkdown.length,
     });
 
+    await setProgressStage(companyId, "Writing system prompt & intro");
     logIngestEvent(companyId, "llm_prompts_begin");
     const [systemPrompt, publicAgentDescription] = await Promise.all([
       generateSystemPrompt(company.companyName, company.sourceUrl, knowledgeMarkdown),
@@ -188,6 +197,7 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
         knowledgeMarkdown,
         systemPrompt,
         publicAgentDescription,
+        progressStage: null,
         errorMessage: null,
       },
     });
@@ -202,6 +212,7 @@ export async function runCompanyIngestion(companyId: string): Promise<void> {
       where: { id: companyId },
       data: {
         status: CompanyStatus.FAILED,
+        progressStage: null,
         errorMessage: message,
       },
     });

@@ -4,8 +4,12 @@ import { parseHTML } from "linkedom";
 export const DEFAULT_FETCH_TIMEOUT_MS = 12_000;
 export const DEFAULT_USER_AGENT = "SiteSageBot/0.1 (+https://example.local; research crawler)";
 
-/** Large marketing sites ship multi‑MB HTML; linkedom + Readability + cheerio are sync and can freeze the worker. */
-export const MAX_HTML_CHARS_FOR_INGEST = 1_200_000;
+/**
+ * Large marketing sites ship multi‑MB HTML; linkedom + Readability + cheerio are
+ * sync and can freeze the worker. 500k chars still captures a typical article
+ * while dropping per-page parse from tens of seconds to a few hundred ms.
+ */
+export const MAX_HTML_CHARS_FOR_INGEST = 500_000;
 
 export function truncateHtmlForIngest(html: string): string {
   if (html.length <= MAX_HTML_CHARS_FOR_INGEST) {

@@ -8,6 +8,7 @@ import {
 } from "@/lib/ingest/fetch-page";
 import { logIngestEvent } from "@/lib/ingest/ingest-telemetry";
 import { normalizeSeedUrl } from "@/lib/ingest/normalize-seed-url";
+import { setProgressStage } from "@/lib/ingest/pipeline-progress";
 import { isPathAllowed, parseRobotsTxt, type RobotRules } from "@/lib/ingest/robots";
 
 const FETCH_TIMEOUT_MS = DEFAULT_FETCH_TIMEOUT_MS;
@@ -24,11 +25,14 @@ const MAX_SITEMAP_XML_CHARS = 2_000_000;
  * Leave generous room for downstream Tavily + multiple OpenAI calls inside the
  * same serverless invocation (total Vercel `maxDuration` is 300s in our config).
  */
-const CRAWL_BUDGET_MS = 120_000;
+const CRAWL_BUDGET_MS = 90_000;
 const CRAWL_CONCURRENCY = 5;
+const SITEMAP_BUDGET_MS = 15_000;
+const SITEMAP_FETCH_TIMEOUT_MS = 8_000;
+const MAX_LINKS_PER_PAGE = 15;
 
-async function fetchText(url: string): Promise<Response> {
-  return fetchWithTimeout(url, FETCH_TIMEOUT_MS, USER_AGENT);
+async function fetchText(url: string, timeoutMs: number = FETCH_TIMEOUT_MS): Promise<Response> {
+  return fetchWithTimeout(url, timeoutMs, USER_AGENT);
 }
 
 function collectSameOriginLinks(html: string, base: URL, originHost: string): string[] {
@@ -78,11 +82,12 @@ async function collectSitemapSeedUrls(root: URL, robotsRules: RobotRules): Promi
   const originHost = root.hostname;
   const origin = root.origin;
   const out: string[] = [];
+  const deadline = Date.now() + SITEMAP_BUDGET_MS;
 
   let sitemapXml: string;
   try {
     const sitemapUrl = new URL("/sitemap.xml", origin).toString();
-    const res = await fetchText(sitemapUrl);
+    const res = await fetchText(sitemapUrl, SITEMAP_FETCH_TIMEOUT_MS);
     if (!res.ok) {
       return out;
     }
@@ -90,6 +95,10 @@ async function collectSitemapSeedUrls(root: URL, robotsRules: RobotRules): Promi
     sitemapXml =
       rawSitemap.length > MAX_SITEMAP_XML_CHARS ? rawSitemap.slice(0, MAX_SITEMAP_XML_CHARS) : rawSitemap;
   } catch {
+    return out;
+  }
+
+  if (Date.now() >= deadline) {
     return out;
   }
 
@@ -115,23 +124,33 @@ async function collectSitemapSeedUrls(root: URL, robotsRules: RobotRules): Promi
 
   if (isSitemapIndex(sitemapXml)) {
     const indexLocs = parseSitemapLocs(sitemapXml).filter((l) => l.toLowerCase().includes(".xml"));
-    for (const childUrl of indexLocs.slice(0, MAX_SITEMAP_INDEXES)) {
-      try {
-        const childRes = await fetchText(childUrl);
-        if (!childRes.ok) {
-          continue;
-        }
-        const rawChild = await childRes.text();
-        const childXml =
-          rawChild.length > MAX_SITEMAP_XML_CHARS ? rawChild.slice(0, MAX_SITEMAP_XML_CHARS) : rawChild;
-        for (const loc of parseSitemapLocs(childXml)) {
-          tryAddUrl(loc);
-          if (out.length >= MAX_SITEMAP_PAGE_URLS) {
-            return [...new Set(out)];
+    const children = indexLocs.slice(0, MAX_SITEMAP_INDEXES);
+    const childResponses = await Promise.all(
+      children.map(async (childUrl) => {
+        try {
+          const res = await fetchText(childUrl, SITEMAP_FETCH_TIMEOUT_MS);
+          if (!res.ok) {
+            return null;
           }
+          const raw = await res.text();
+          return raw.length > MAX_SITEMAP_XML_CHARS ? raw.slice(0, MAX_SITEMAP_XML_CHARS) : raw;
+        } catch {
+          return null;
         }
-      } catch {
-        /* skip bad child sitemap */
+      }),
+    );
+    for (const childXml of childResponses) {
+      if (!childXml) {
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        break;
+      }
+      for (const loc of parseSitemapLocs(childXml)) {
+        tryAddUrl(loc);
+        if (out.length >= MAX_SITEMAP_PAGE_URLS) {
+          return [...new Set(out)];
+        }
       }
     }
   } else {
@@ -207,7 +226,10 @@ async function processQueueItem(
   logIngestEvent(ingestCompanyId, "crawl_parse_done", { url, textChars: text.length });
 
   const page = text.length > 80 ? { url, text } : undefined;
-  const links = depth < MAX_DEPTH ? collectSameOriginLinks(html, current, originHost) : undefined;
+  const links =
+    depth < MAX_DEPTH
+      ? collectSameOriginLinks(html, current, originHost).slice(0, MAX_LINKS_PER_PAGE)
+      : undefined;
 
   return { url, depth, page: page ?? undefined, links, skipReason: page ? undefined : "text_too_short" };
 }
@@ -236,6 +258,7 @@ export async function crawlPublicSite(startUrl: string, ingestCompanyId: string)
 
   const seedUrls: string[] = [root.toString()];
   logIngestEvent(ingestCompanyId, "crawl_sitemap_begin");
+  await setProgressStage(ingestCompanyId, "Reading sitemap");
   const sitemapUrls = await collectSitemapSeedUrls(root, robotsRules);
   logIngestEvent(ingestCompanyId, "crawl_sitemap_done", { urlCount: sitemapUrls.length });
   for (const u of sitemapUrls) {
@@ -331,6 +354,11 @@ export async function crawlPublicSite(startUrl: string, ingestCompanyId: string)
         }
       }
     }
+
+    await setProgressStage(
+      ingestCompanyId,
+      `Crawling website (${results.length} / ${MAX_PAGES} pages)`,
+    );
   }
 
   logIngestEvent(ingestCompanyId, "crawl_bfs_done", {

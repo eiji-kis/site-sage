@@ -36,6 +36,7 @@ model Company {
   companyName       String
   sourceUrl         String
   status                 CompanyStatus @default(PENDING)
+  progressStage          String?
   crawlCorpus            String?       @db.Text
   webResearchCorpus      String?       @db.Text
   knowledgeMarkdown      String?       @db.Text
