@@ -1,0 +1,38 @@
+# Copy to .env.local and adjust. Values below match docker-compose defaults.
+
+# Use schema=site_sage so the default search_path matches app tables (see prisma/schema.prisma).
+DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:55431/site_sage?schema=site_sage"
+
+# Required — Auth.js will 500 without it (openssl rand -base64 32)
+AUTH_SECRET="replace-with-openssl-rand-base64-32"
+
+# If you change AUTH_SECRET, clear this site’s cookies (or use a private window) or you will see
+# JWTSessionError / "no matching decryption secret" until the old session cookie is gone.
+OPENAI_API_KEY="sk-..."
+
+# --- Company ingest: Tavily (optional third-party discovery) ---
+# If unset, ingestion uses the official-site crawl only.
+TAVILY_API_KEY="tvly-..."
+# Max Tavily API credits per single company ingestion run (basic search = 1 credit each; see Tavily pricing).
+TAVILY_MAX_CREDITS_PER_COMPANY_INGEST="5"
+# Optional: Tavily HTTP timeout in ms (default 25000).
+# TAVILY_TIMEOUT_MS="25000"
+
+# Optional: create admin on `pnpm db:seed`
+ADMIN_SEED_EMAIL="admin@example.com"
+ADMIN_SEED_PASSWORD="change-me"
+ADMIN_SEED_NAME="Admin"
+
+# --- Public analytics (first-party) ---
+# The app sets an HttpOnly cookie `ss_vid` (anonymous visitor id) for aggregate metrics on /c/[slug].
+# Events store counts and metadata (referrer, UTM search string, link hrefs) — not chat transcripts.
+# EU deployments should align this with your cookie / consent policy.
+
+# --- Public demo / lead CTA (shown on /c/[slug]) ---
+# mailto target for the "Email us" button
+SITE_SAGE_LEADS_EMAIL="hello@example.com"
+# Prefilled mailto body: "Hey {name}, … {brand}'s demo … for {company name} …"
+SITE_SAGE_LEADS_GREETING_NAME="Patrick"
+SITE_SAGE_LEADS_BRAND_NAME="KIS Solutions"
+# Full profile or company URL for the LinkedIn button (https:// recommended)
+SITE_SAGE_LINKEDIN_URL="https://www.linkedin.com/company/example"

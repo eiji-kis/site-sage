@@ -1,0 +1,36 @@
+---
+description: Global project standards for Next.js + Prisma + shadcn + RHF + Zod + Zustand
+alwaysApply: true
+---
+
+You are working in a modern Next.js App Router codebase.
+
+Core architecture rules:
+- Prefer React Server Components by default
+- Prefer Server Actions for mutations and form submissions
+- Only use client components when browser APIs, interactivity, or client state are required
+- Do not introduce unnecessary API routes for internal app-to-db flows
+- Prefer direct Prisma usage on the server
+- Prefer route handlers only for webhooks, external integrations, or public HTTP endpoints
+
+Code quality rules:
+- Use TypeScript everywhere
+- Keep functions and components small and focused
+- Prefer explicit typing for exported APIs
+- Avoid any
+- Avoid large files and duplicated logic
+- Reuse existing utilities and patterns before inventing new abstractions
+- Keep naming clear and business-oriented
+
+Project structure rules:
+- Put shared server utilities in src/lib
+- Put server actions in src/actions or near the relevant feature when already colocated
+- Put validation schemas in src/lib/validations or feature-local schema files
+- Put reusable UI in src/components
+- Keep feature-specific code grouped by feature when practical
+
+When making changes:
+- First inspect nearby files and follow existing conventions
+- Make the smallest correct change that fits the architecture
+- Do not rewrite unrelated code
+- Preserve existing behavior unless the task explicitly requires a change

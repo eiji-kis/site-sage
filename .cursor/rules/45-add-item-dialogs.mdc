@@ -1,0 +1,22 @@
+---
+description: Use dialogs for “add item” flows on dense pages; keyboard shortcuts for modal forms
+globs:
+  - "src/**/*.tsx"
+---
+
+## Add-item flows (lists / sections)
+
+- For **adding optional rows** to a page that already has tables, lists, or multiple cards (e.g. project team, short-term goals), **do not** leave a full **inline add form** visible by default—it competes with the content and feels noisy.
+- Prefer a compact trigger in the **`SectionCard` `action`** slot (e.g. **Add goal**, **Add person**) that opens a **`Dialog`** (shadcn/Radix) containing the form.
+- Match existing patterns: `AddProjectMemberDialog`, `AddProjectGoalDialog`, `CreateProjectDialog` (trigger + `DialogContent` + `DialogFooter` with Cancel + submit).
+
+## After submit
+
+- On **success**: close the dialog (`onOpenChange` / local `open` state), rely on **`revalidatePath`** from the server action for fresh data.
+- On **next open**: remount the inner form with a **`key`** bump when the dialog opens so **`useActionState`** resets and stale success/error state does not linger.
+
+## Keyboard (modal forms)
+
+- For forms in dialogs with text fields (and optionally selects), support **⌘ Enter** and **Ctrl Enter** to submit while focus is on an **`input`** or **`select`** (not hidden inputs): `onKeyDown` on the **`<form>`**, `preventDefault`, then **`requestSubmit()`** if not already pending.
+- Reference: `create-member-form.tsx`, `add-project-goal-dialog.tsx`.
+- Optional UX: show **⌘↩** on the primary submit button via Lucide **`Command`** + **`CornerDownLeft`**, with a **`title`** tooltip mentioning Ctrl+Enter on Windows/Linux.

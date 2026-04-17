@@ -1,0 +1,37 @@
+---
+description: Dark SaaS shell, ambient backgrounds, and React Bits–style flourishes
+globs:
+  - "src/app/**/*.tsx"
+  - "src/components/**/*.tsx"
+  - "src/app/globals.css"
+alwaysApply: false
+---
+
+## Product look: dark-first modern SaaS
+
+- The app ships **dark mode by default** (`dark` on `<html>` in `src/app/layout.tsx`). New UI should assume this palette and semantic tokens (`background`, `foreground`, `card`, `primary`, `border`, `muted-foreground`, etc.) from `src/app/globals.css`.
+- **Ambient mesh**: the fixed layer uses `.app-mesh` and `.app-mesh-glow` (see `globals.css`). Do not remove or cover it with opaque full-viewport wrappers; page content lives in the elevated `z-10` shell from the root layout.
+- **Glass surfaces**: prefer `bg-card/80`–style translucency, `backdrop-blur-md` or `backdrop-blur-xl`, `ring-1 ring-white/[0.06]`, and soft `shadow-lg shadow-black/25` for cards and panels. The shared `Card` primitive already leans this direction—extend it with `className` rather than inventing a second card system.
+
+## React Bits–inspired patterns (reference: https://reactbits.dev )
+
+React Bits is a catalog of animated, copy-paste UI patterns. **Do not paste large third-party blobs blindly**; match *behavior* and *visual language* with small, reviewable components:
+
+- **Spotlight surfaces**: use `SpotlightCard` (`src/components/ui/spotlight-card.tsx`) for hero tiles, auth panels, and empty states where a subtle pointer-following glow improves perceived quality. Avoid stacking it around dense tables or repeated list rows (noise + motion).
+- **Gradient accents**: use the utility `.text-gradient-brand` for short headlines or key words, not entire paragraphs.
+- **Motion**: prefer CSS-driven motion (`globals.css` keyframes for the mesh). If adding JS-driven motion, keep it **respectful of `prefers-reduced-motion`** and avoid animating layout-heavy properties on large lists.
+
+## When adding new pages
+
+- Reuse **SpotlightCard + inner transparent Card** (see home, login, new agent form) for single focal panels.
+- Keep **admin data screens** calmer: standard `Card`, tables, and toolbars; optional gradient text on the page title only.
+- For **public chat**, mirror glass + bordered bubbles; keep contrast readable on `muted` assistant bubbles.
+
+## Dependencies
+
+- **React Bits via shadcn registry** (`@react-bits` in `components.json`): use the **shadcn MCP** in Cursor (`npx shadcn mcp`) or the CLI to discover and add components, for example:
+  - `pnpm exec shadcn search @react-bits -q spotlight`
+  - `pnpm exec shadcn add @react-bits/Aurora-TS-TW @react-bits/ShinyText-TS-TW @react-bits/BorderGlow-TS-TW -y`
+- **Installed primitives** (see `src/components/`): `Aurora.tsx`, `ShinyText.tsx`, `BorderGlow.tsx` from the registry. Prefer thin **app wrappers** in `src/components/shell/` and `src/components/marketing/` (e.g. `AmbientBackground`, `BrandEyebrow`, `AdminNavBrand`) so pages stay readable and tokens stay consistent.
+- **`motion`** (Motion One) and **`ogl`** are allowed where a pulled React Bits block depends on them (Aurora / ShinyText). Do not add extra animation libraries beyond what a registry item requires.
+- Prefer **no other animation libraries** for custom code: Tailwind + registry blocks + CSS in `globals.css` remain the default.

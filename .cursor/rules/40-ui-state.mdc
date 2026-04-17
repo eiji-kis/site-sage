@@ -1,0 +1,26 @@
+---
+description: shadcn UI and Zustand usage rules
+globs:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+---
+
+UI rules:
+- Prefer shadcn/ui components for reusable app UI primitives
+- Keep styling consistent with Tailwind utility classes already used in the codebase
+- Prefer accessible patterns and semantic HTML
+- Reuse existing UI primitives before creating new ones
+
+Zustand rules:
+- Use Zustand only for client-side UI/app state that does not belong on the server
+- Good Zustand use cases:
+  - sidebar state
+  - dialog state
+  - local board interaction state
+  - ephemeral filters
+  - optimistic UI state for rich interactions
+- Do not use Zustand as a default data-fetching layer
+- Do not duplicate server state in Zustand unless there is a clear UX reason
+
+When state is server-owned:
+- Prefer server rendering, URL params, Server Actions, or targeted client fetching patterns over global client stores

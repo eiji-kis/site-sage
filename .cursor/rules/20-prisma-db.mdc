@@ -1,0 +1,29 @@
+---
+description: Prisma and database rules
+globs:
+  - "prisma/**/*.prisma"
+  - "src/lib/prisma.ts"
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+---
+
+Prisma rules:
+- Use a single shared Prisma client pattern for the app
+- Never instantiate PrismaClient repeatedly across files
+- Keep database access on the server only
+- Never import Prisma client into code that must run in the browser
+- Prefer selecting only the fields needed instead of over-fetching
+- Prefer clear relation names and explicit query shapes
+- Keep schema naming and model naming consistent
+
+Schema change rules:
+- When changing Prisma schema, also consider:
+  - whether a migration is needed
+  - whether seed data must change
+  - whether related Zod schemas or forms must change
+  - whether pages/actions using that model need updates
+
+Safety rules:
+- Do not suggest exposing raw database errors to users
+- Handle not-found and uniqueness errors cleanly
+- Preserve data integrity and relation consistency

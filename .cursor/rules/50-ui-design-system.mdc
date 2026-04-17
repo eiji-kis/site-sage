@@ -1,0 +1,81 @@
+---
+description: UI consistency, layout, and design system rules
+globs:
+  - "src/**/*.tsx"
+  - "src/**/*.ts"
+alwaysApply: false
+---
+
+This app must feel visually consistent across all pages.
+
+**Dark SaaS baseline:** the UI is dark-first with an ambient mesh background and glassy surfaces. Prefer semantic tokens from `globals.css`. For spotlight cards, mesh rules, and React Bits–style guidance, see **`55-saas-dark-reactbits.mdc`**.
+
+Design system principles:
+- Prefer reuse over one-off UI
+- Prefer composition of shared primitives over custom page-specific markup
+- Use shadcn/ui as the base layer for interactive primitives
+- Build app-specific wrappers when patterns repeat
+- Keep layouts calm, dense enough for productivity, and visually structured
+
+Page layout rules:
+- Every major page should use the shared app shell
+- Every page should follow a consistent width and padding strategy
+- Prefer a standard page structure:
+  1. page header
+  2. optional toolbar / filters
+  3. primary content grid or table
+  4. secondary panels only when needed
+- Avoid ad hoc spacing and random max-width choices
+- Avoid deeply nested containers unless they improve structure
+
+Spacing rules:
+- Use a consistent spacing scale
+- Prefer gaps of 2, 4, 6, 8, or 10
+- Prefer section spacing that is visibly intentional
+- Do not mix many near-identical spacing values on the same screen
+
+Typography rules:
+- Use a small, consistent set of text sizes
+- Page title should be visually dominant
+- Section titles should be consistent across pages
+- Muted/supporting text should use the muted foreground token
+- Avoid arbitrary font-size changes for one-off emphasis
+
+Card and panel rules:
+- Use shared card/panel primitives for boxed content
+- Cards with the same purpose should have the same padding and header structure
+- Do not invent slightly different card styles on different pages
+
+Form rules:
+- Use shared form field composition
+- Labels, help text, errors, and spacing must be consistent
+- Prefer single-column forms unless multi-column clearly improves scanning
+
+Pill selects (compact dropdowns):
+- Use for **native** `<select>` controls in **dense** UI (toolbars, overview rows, inline filters, compact metadata) where a full-width field feels heavy. Keeps alignment with **pill-shaped** adjacent controls (e.g. date chips, toggles).
+- **Visual recipe**: `h-8`, `rounded-full`, `border border-border`, `bg-muted/30` (with `dark:bg-muted/20`), `text-sm font-medium`, `hover:bg-muted/50`, `focus-visible:border-ring` + `focus-visible:ring-2 focus-visible:ring-ring/40`, `disabled:opacity-50`, horizontal padding (`pl-3 pr-8`), `max-w-[min(18rem,calc(100vw-2.5rem))]` or similar so pills do not overflow small viewports.
+- **Native chevron**: `appearance-none` on the `<select>`, wrap in `relative inline-flex`, overlay a small **ChevronDown** (`pointer-events-none`, `absolute right-2`, vertically centered) so the control still looks like a pill, not a browser default box.
+- **Accessibility**: when the visible section label is omitted or minimal, set **`aria-label`** (and optional **`title`** for longer policy text). Keep `<option>` text concise; use `title` on the select for full-line help instead of a second line of helper copy.
+- **Submission**: prefer native `<select name="…">` with Server Actions over Radix Select **unless** you need combobox search or async options; if you use shadcn **Select**, reuse the same **pill** styling on `SelectTrigger` (`rounded-full`, `h-8` / `size="sm"`, muted surface, `w-fit` / `max-w-*`).
+- **Reuse**: after a second use, extract a shared primitive (e.g. `PillSelect` + class variant) in `src/components/ui` rather than copying long class strings.
+- **Reference implementation**: `FeatureOverviewCompact` in `src/components/projects/deliverable-feature-detail-form.tsx` (`pillSelectClass` / `pillButtonClass`).
+
+Table/list rules:
+- Data-heavy screens should prioritize readability and alignment
+- Actions should be placed consistently
+- Filters and bulk actions should appear in the same area across similar pages
+
+Color rules:
+- Use semantic theme tokens, not arbitrary Tailwind colors
+- Prefer background, foreground, muted, border, primary, destructive, accent tokens
+- Do not hardcode random color shades unless explicitly approved for data visualization or status mapping
+
+Component reuse rules:
+- Before creating new UI, check whether an existing shared component already solves the problem
+- If a pattern appears 2 or more times, prefer extracting a shared component
+- Prefer app-specific wrappers like PageHeader, SectionCard, EmptyState, StatCard, FilterBar
+
+When generating UI:
+- Match nearby pages and existing primitives
+- If no pattern exists, create one that is reusable and simple
+- Favor calm, product-grade layouts; use **gradient text, mesh, and spotlight** only for focal moments (hero, auth, empty states), not for dense operational screens

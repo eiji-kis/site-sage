@@ -1,0 +1,25 @@
+---
+description: Forms, validation, React Hook Form, and Zod rules
+globs:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+---
+
+Forms and validation rules:
+- Use Zod for input schemas
+- Reuse schemas instead of duplicating validation rules across client and server
+- Use React Hook Form for non-trivial client forms
+- Use @hookform/resolvers/zod when wiring RHF to Zod
+- Keep server-side validation authoritative
+- Prefer schema-driven form types inferred from Zod when practical
+
+Implementation rules:
+- Keep form components focused on rendering and user interaction
+- Keep mutation logic in Server Actions or server utilities, not embedded deeply in UI components
+- Return structured error states suitable for the UI
+- Keep success/error messages concise and user-friendly
+
+Do not:
+- Scatter validation logic across unrelated files
+- Trust client-only validation
+- Mix form rendering, persistence, and unrelated business logic in one giant component

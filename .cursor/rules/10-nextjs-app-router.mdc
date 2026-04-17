@@ -1,0 +1,31 @@
+---
+description: Next.js App Router patterns
+globs:
+  - "src/app/**/*.ts"
+  - "src/app/**/*.tsx"
+  - "src/actions/**/*.ts"
+  - "src/actions/**/*.tsx"
+---
+
+Next.js architecture rules:
+- Default to server components
+- Add "use client" only when necessary
+- Server components may fetch data directly with Prisma or other server-side I/O
+- Prefer Server Actions for create/update/delete flows
+- After mutations, use the appropriate revalidation/navigation pattern instead of inventing ad hoc cache logic
+- Keep page.tsx and layout.tsx focused on composition
+- Move non-trivial logic into feature helpers, queries, or server utilities
+
+Data fetching rules:
+- Prefer server-side data fetching for initial page loads
+- Avoid client-side fetching for data that can be rendered on the server
+- Avoid introducing TanStack Query unless the use case clearly needs client-side server-state management
+- If proposing TanStack Query, explicitly justify why server rendering + Server Actions are not enough
+
+Route handler rules:
+- Do not create route handlers just to proxy internal database access
+- Use route handlers for webhooks, third-party callbacks, public APIs, or cases that truly require an HTTP boundary
+
+Form rules:
+- Prefer server-first form handling with Server Actions
+- Keep validation authoritative on the server even if client validation also exists
